@@ -1,0 +1,22 @@
+{
+  "name": "@howtocards/preview",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/howtocards/preview.git"
+  },
+  "author": "Sergey Sova <mail@sergeysova.com> (https://sergeysova.com/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/howtocards/preview/issues"
+  },
+  "homepage": "https://github.com/howtocards/preview#readme",
+  "dependencies": {
+    "puppeteer": "^1.19.0"
+  }
+}
