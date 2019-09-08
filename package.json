@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node main.js",
+    "test": "echo \"Error: no test specified\" && true"
   },
   "repository": {
     "type": "git",
@@ -17,6 +18,6 @@
   },
   "homepage": "https://github.com/howtocards/preview#readme",
   "dependencies": {
-    "puppeteer": "^1.19.0"
+    "puppeteer": "1.17.0"
   }
 }

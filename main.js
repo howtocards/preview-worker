@@ -6,7 +6,9 @@ const cardPath = () =>
   path.resolve(__dirname, `screenshots/${new Date().toISOString()}.png`);
 
 async function main() {
-  const browser = await puppeteer.launch();
+  const browser = await puppeteer.launch({
+    args: ["--disable-dev-shm-usage", "--no-sandbox"]
+  });
   try {
     const page = await browser.newPage();
     await page.goto(CARD, { waitUntil: "networkidle0" });
@@ -22,4 +24,7 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+main().catch(error => {
+  console.error(error);
+  process.exit(-1);
+});
