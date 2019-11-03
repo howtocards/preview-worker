@@ -20,6 +20,7 @@
   "dependencies": {
     "amqplib": "^0.5.5",
     "debug": "^4.1.1",
+    "nanoid": "^2.1.6",
     "puppeteer": "1.17.0"
   }
 }
