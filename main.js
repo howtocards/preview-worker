@@ -1,4 +1,5 @@
 const path = require("path")
+const os = require("os")
 const nanoid = require("nanoid")
 const puppeteer = require("puppeteer")
 const amqplib = require("amqplib/callback_api")
@@ -7,6 +8,9 @@ const { EventEmitter } = require("./emitter")
 
 const RABBIT_HOST = "amqp://localhost:5672" // tls 5671
 const RENDER_HOST = "https://howtocards.io"
+const POOL_SIZE = os.cpus().length
+const VIEWPORT = { deviceScaleFactor: 2, width: 1920, height: 1080 }
+
 const cardPath = () =>
   path.resolve(__dirname, `screenshots/${new Date().toISOString()}.png`)
 
@@ -18,12 +22,12 @@ async function main() {
   })
   debug("browser started")
 
-  const pool = new Pool(4)
+  const pool = new Pool(POOL_SIZE)
   debug("pool created")
 
   await pool.init(async () => {
     const page = await browser.newPage()
-    await page.setViewport({ deviceScaleFactor: 2, width: 1920, height: 1080 })
+    await page.setViewport(VIEWPORT)
     await page.goto(`${RENDER_HOST}`, { waitUntil: "networkidle0" })
     return page
   })
@@ -70,7 +74,7 @@ async function main() {
     })
   } catch (error) {
     console.error(error)
-    debug("FAILED start")
+    debug("FAILED to init connection to rabbit")
     await browser.close()
   }
 }
