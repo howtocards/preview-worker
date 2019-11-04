@@ -124,6 +124,9 @@ async function render(page, { url, selector, callback }, id) {
   const el = await page.$(selector)
   debug("article found")
 
+  const html = await page.$eval(selector, (node) => node.innerHTML)
+  debug("article html", html.slice(0, 90))
+
   const { x, y, width } = await el.boundingBox()
   const height = Math.round((width / 16) * 9)
   debug("bounding box", { x, y, width, height })
