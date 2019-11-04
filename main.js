@@ -1,18 +1,28 @@
 const path = require("path")
 const os = require("os")
+
 const nanoid = require("nanoid")
 const puppeteer = require("puppeteer")
 const amqplib = require("amqplib/callback_api")
+const { EventEmitter } = require("emitting")
+const FormData = require("form-data")
+const fetch = require("node-fetch").default
+
 const debug = require("debug")("worker")
-const { EventEmitter } = require("./emitter")
 
 const RABBIT_HOST = "amqp://localhost:5672" // tls 5671
 const RENDER_HOST = "https://howtocards.io"
+const UPLOADER_HOST = "http://localhost:4000"
 const POOL_SIZE = os.cpus().length
 const VIEWPORT = { deviceScaleFactor: 2, width: 1920, height: 1080 }
 
 const cardPath = () =>
   path.resolve(__dirname, `screenshots/${new Date().toISOString()}.png`)
+
+main().catch((error) => {
+  console.error(error)
+  process.exit(-1)
+})
 
 async function main() {
   debug("worker starting")
@@ -49,7 +59,10 @@ async function main() {
         const id = nanoid()
 
         try {
-          await pool.process((page) => render(page, json, id))
+          await pool.process(async (page) => {
+            const image = await render(page, json, id)
+            const path = await upload(image)
+          })
           channel.ack(message)
         } catch (error) {
           console.error("failed to render", error, json)
@@ -115,20 +128,36 @@ async function render(page, { url, selector, callback }, id) {
   const height = Math.round((width / 16) * 9)
   debug("bounding box", { x, y, width, height })
 
-  await page.screenshot({
-    path: cardPath(),
+  const image = await page.screenshot({
     omitBackground: true,
+    type: "png",
     clip: { x, y, width, height },
   })
   debug("screenshot taken")
 
   console.timeEnd(timeLabel)
+  return image
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(-1)
-})
+async function upload(image) {
+  debug("image uploading started")
+  const form = new FormData()
+  form.append("image", image, { filename: "preview.png" })
+
+  const response = await fetch(`${UPLOADER_HOST}/upload`, {
+    method: "POST",
+    body: form,
+  }).then((r) => r.json())
+  debug("image uploaded")
+
+  if (response.status === "ok") {
+    return response.files[0].path
+  }
+
+  debug("image upload status is not ok")
+
+  throw new Error(response.error)
+}
 
 class Pool {
   constructor(count) {
@@ -147,10 +176,15 @@ class Pool {
 
   async _run(fn, page) {
     debug("POOL start run", this.pages.length)
-    await fn(page)
-    this.pages.push(page)
-    debug("POOL end run", this.pages.length)
-    this.events.emit("released")
+    try {
+      await fn(page)
+    } catch (error) {
+      debug("Failed to execute fn in pool", error)
+    } finally {
+      this.pages.push(page)
+      debug("POOL end run", this.pages.length)
+      this.events.emit("released", undefined)
+    }
   }
 
   /**

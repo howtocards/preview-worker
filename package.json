@@ -20,7 +20,10 @@
   "dependencies": {
     "amqplib": "^0.5.5",
     "debug": "^4.1.1",
+    "emitting": "^1.0.0",
+    "form-data": "^2.5.1",
     "nanoid": "^2.1.6",
+    "node-fetch": "^2.6.0",
     "puppeteer": "1.17.0"
   }
 }
