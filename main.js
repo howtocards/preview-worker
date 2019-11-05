@@ -1,4 +1,3 @@
-const path = require("path")
 const os = require("os")
 
 const nanoid = require("nanoid")
@@ -10,20 +9,16 @@ const fetch = require("node-fetch").default
 
 const debug = require("debug")("worker")
 
-const RABBIT_HOST = "amqp://localhost:5672" // tls 5671
-const RENDER_HOST = "https://howtocards.io"
-const UPLOADER_HOST = "http://localhost:4000"
-const QUEUE_NAME = "howtocards:render"
+const RABBIT_HOST = process.env.RABBIT_HOST || "amqp://localhost:5672" // tls 5671
+const RENDER_HOST = process.env.RENDER_HOST || "https://howtocards.io"
+const UPLOADER_HOST = process.env.UPLOADER_HOST || "http://localhost:4000"
+const QUEUE_NAME = process.env.QUEUE_NAME || "howtocards:render"
 
 const POOL_SIZE = process.env.POOL_SIZE
   ? parseInt(process.env.POOL_SIZE, 10)
   : os.cpus().length / 2
 
 const VIEWPORT = { deviceScaleFactor: 2, width: 1920, height: 1080 }
-const ALLOWED_TYPES = ["user", "card"]
-
-const cardPath = () =>
-  path.resolve(__dirname, `screenshots/${new Date().toISOString()}.png`)
 
 main().catch((error) => {
   console.error(error)
