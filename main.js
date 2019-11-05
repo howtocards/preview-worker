@@ -13,8 +13,14 @@ const debug = require("debug")("worker")
 const RABBIT_HOST = "amqp://localhost:5672" // tls 5671
 const RENDER_HOST = "https://howtocards.io"
 const UPLOADER_HOST = "http://localhost:4000"
-const POOL_SIZE = os.cpus().length
+const QUEUE_NAME = "howtocards:render"
+
+const POOL_SIZE = process.env.POOL_SIZE
+  ? parseInt(process.env.POOL_SIZE, 10)
+  : os.cpus().length / 2
+
 const VIEWPORT = { deviceScaleFactor: 2, width: 1920, height: 1080 }
+const ALLOWED_TYPES = ["user", "card"]
 
 const cardPath = () =>
   path.resolve(__dirname, `screenshots/${new Date().toISOString()}.png`)
@@ -25,6 +31,7 @@ main().catch((error) => {
 })
 
 async function main() {
+  console.log("worker: iron heating")
   debug("worker starting")
 
   const browser = await puppeteer.launch({
@@ -50,22 +57,41 @@ async function main() {
     const channel = await createChannel(connection)
     debug("rabbit channel created")
 
+    console.log("worker: ready to accept tasks")
+
     channel.consume(
-      "event",
+      QUEUE_NAME,
       async (message) => {
-        const json = JSON.parse(message.content.toString())
-        debug("handled event", json)
-
-        const id = nanoid()
-
         try {
-          await pool.process(async (page) => {
-            const image = await render(page, json, id)
-            const path = await upload(image)
-          })
+          const json = JSON.parse(message.content.toString())
+          debug("handled event", json)
+
+          const { type, ...payload } = json
+
+          if (!checkEvent({ type, payload })) {
+            debug("received unknown message type", type)
+            channel.ack(message)
+            return
+          }
+
+          const id = nanoid(50)
+
+          const result = await pool.process((page) =>
+            render({
+              page,
+              id,
+              ...createParams(type, payload),
+              injectCSS: "header { opacity: 0 }",
+            }),
+          )
+
+          const screenshotPath = await upload(result.image)
+
           channel.ack(message)
         } catch (error) {
-          console.error("failed to render", error, json)
+          console.error("failed to render", error, message.content)
+          channel.ack(message)
+          debug("message acked")
         }
       },
       { noAck: false },
@@ -110,22 +136,36 @@ function createChannel(connection) {
   })
 }
 
-async function render(page, { url, selector, callback }, id) {
-  const timeLabel = `screenshot ${id}:${url}`
+/**
+ * Render page and create screenshot
+ * Optionally snapshot html for specified selector
+ * @param {object} param0
+ * @param {object} param0.page
+ * @param {string} param0.id
+ * @param {string} param0.url
+ * @param {object} param0.screenshot
+ * @param {string} param0.screenshot.selector
+ * @param {string | null} param0.injectCSS
+ * @param {object} param0.snapshot
+ * @param {string | null} param0.snapshot.selector
+ * @returns {Promise<{ image: Buffer, html?: string }>}
+ */
+async function render({ page, id, url, screenshot, snapshot, injectCSS }) {
+  const timeLabel = `worker: screenshot ${id}:${url}`
   debug(timeLabel)
+  console.log(timeLabel)
   console.time(timeLabel)
 
   await page.goto(`${RENDER_HOST}${url}`, { waitUntil: "networkidle0" })
   debug(`opened ${RENDER_HOST}${url}`)
 
-  await page.addStyleTag({ content: "header{opacity: 0}" })
-  debug("header hidden")
+  if (injectCSS) {
+    await page.addStyleTag({ content: injectCSS })
+    debug("CSS injected")
+  }
 
-  const el = await page.$(selector)
-  debug("article found")
-
-  const html = await page.$eval(selector, (node) => node.innerHTML)
-  debug("article html", html.slice(0, 90))
+  const el = await page.$(screenshot.selector)
+  debug("element found")
 
   const { x, y, width } = await el.boundingBox()
   const height = Math.round((width / 16) * 9)
@@ -139,7 +179,15 @@ async function render(page, { url, selector, callback }, id) {
   debug("screenshot taken")
 
   console.timeEnd(timeLabel)
-  return image
+
+  if (snapshot) {
+    const selector = snapshot.selector || screenshot.selector
+    const html = await page.$eval(selector, (node) => node.outerHTML)
+    debug("snapshot html", html.slice(0, 90))
+    return { image, html }
+  }
+
+  return { image }
 }
 
 async function upload(image) {
@@ -179,8 +227,9 @@ class Pool {
 
   async _run(fn, page) {
     debug("POOL start run", this.pages.length)
+    let result = null
     try {
-      await fn(page)
+      result = await fn(page)
     } catch (error) {
       debug("Failed to execute fn in pool", error)
     } finally {
@@ -188,19 +237,48 @@ class Pool {
       debug("POOL end run", this.pages.length)
       this.events.emit("released", undefined)
     }
+    return result
   }
 
   /**
-   * @param {(page) => Promise} fn
-   * @returns {Promise<void>}
+   * @template T
+   * @param {(page) => Promise<T>} fn
+   * @returns {Promise<T>}
    */
   async process(fn) {
     if (this.pages.length) {
       debug("POOL has pages", this.pages.length)
-      await this._run(fn, this.pages.pop())
+      return await this._run(fn, this.pages.pop())
     } else {
       await this.events.take("released")
-      await this.process(fn)
+      return await this.process(fn)
     }
   }
+}
+
+function createParams(type, payload) {
+  switch (type) {
+    case "user":
+      return {
+        url: `/@${payload.name}`,
+        screenshot: { selector: "header + div > div" },
+        snapshot: null,
+      }
+    case "card":
+      return {
+        url: `/open/${payload.id}`,
+        screenshot: { selector: "article" },
+        snapshot: { selector: "article [data-slate-editor]" },
+      }
+  }
+}
+
+function checkEvent({ type, payload }) {
+  switch (type) {
+    case "user":
+      return typeof payload === "object" && typeof payload.name === "string"
+    case "card":
+      return typeof payload === "object" && typeof payload.id === "string"
+  }
+  return false
 }
