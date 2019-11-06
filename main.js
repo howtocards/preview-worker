@@ -7,6 +7,7 @@ const { EventEmitter } = require("emitting")
 const FormData = require("form-data")
 const fetch = require("node-fetch").default
 
+const De = require("debug")
 const debug = require("debug")("worker")
 
 const RABBIT_HOST = process.env.RABBIT_HOST || "amqp://localhost:5672" // tls 5671
@@ -45,6 +46,8 @@ async function main() {
   })
   debug("pool initialized")
 
+  let timeValues = []
+
   try {
     const connection = await connect(RABBIT_HOST)
     debug("rabbit connected")
@@ -53,6 +56,8 @@ async function main() {
     debug("rabbit channel created")
 
     console.log("worker: ready to accept tasks")
+
+    let currentInQueue = 0
 
     channel.consume(
       QUEUE_NAME,
@@ -69,7 +74,12 @@ async function main() {
             return
           }
 
-          const id = nanoid(50)
+          currentInQueue++
+
+          const id = nanoid(5)
+
+          const timeStart = Date.now()
+          // console.group(`${id} start ${timeStart}`)
 
           const result = await pool.process((page) =>
             render({
@@ -81,8 +91,18 @@ async function main() {
           )
 
           const screenshotPath = await upload(result.image)
-
+          const timeEnd = Date.now()
           channel.ack(message)
+
+          const timeDiff = timeEnd - timeStart
+          console.log(
+            `worker:render ${type}:${id} — ${screenshotPath} in ${timeDiff}ms`,
+            `(med ${getMedian(timeDiff)}ms)`,
+            `(avg ${Math.floor(getAverage(timeDiff))}ms)`,
+            `(queue length ${currentInQueue})`,
+          )
+
+          currentInQueue--
         } catch (error) {
           console.error("failed to render", error, message.content)
           channel.ack(message)
@@ -110,6 +130,23 @@ async function main() {
     console.error(error)
     debug("FAILED to init connection to rabbit")
     await browser.close()
+  }
+
+  function getMedian(diff) {
+    timeValues.push(diff)
+    if (timeValues.length < 2) {
+      return diff
+    }
+    timeValues.sort((a, b) => a - b)
+    const half = Math.floor(timeValues.length / 2)
+    if (timeValues.length % 2) {
+      return timeValues[half]
+    }
+    return timeValues[half - 1] + timeValues[half] / 2.0
+  }
+  function getAverage(diff) {
+    timeValues.push(diff)
+    return timeValues.reduce((a, b) => a + b) / timeValues.length
   }
 }
 
@@ -146,8 +183,9 @@ function createChannel(connection) {
  * @returns {Promise<{ image: Buffer, html?: string }>}
  */
 async function render({ page, id, url, screenshot, snapshot, injectCSS }) {
+  const debug = De(`worker:${id}`)
   const timeLabel = `worker: screenshot ${id}:${url}`
-  debug(timeLabel)
+  // debug(timeLabel)
   console.log(timeLabel)
   console.time(timeLabel)
 
@@ -178,7 +216,8 @@ async function render({ page, id, url, screenshot, snapshot, injectCSS }) {
   if (snapshot) {
     const selector = snapshot.selector || screenshot.selector
     const html = await page.$eval(selector, (node) => node.outerHTML)
-    debug("snapshot html", html.slice(0, 90))
+    debug("snapshot taken")
+    // debug("snapshot html", html.slice(0, 90))
     return { image, html }
   }
 
@@ -205,14 +244,20 @@ async function upload(image) {
   throw new Error(response.error)
 }
 
+const debPool = De("pool")
+
 class Pool {
   constructor(count) {
     this.events = new EventEmitter()
     this.count = count
     this.pages = []
+    this.queue = []
+
+    this.events.on("finished", this.checkNext.bind(this))
   }
 
   init(creator) {
+    debPool("initialize", this.count)
     return Promise.all(Array.from({ length: this.count }, creator)).then(
       (pages) => {
         this.pages = pages
@@ -220,19 +265,28 @@ class Pool {
     )
   }
 
-  async _run(fn, page) {
-    debug("POOL start run", this.pages.length)
+  checkNext() {
+    if (this.queue.length) {
+      this.runNext()
+    }
+  }
+
+  runNext() {
+    this.run(this.queue.shift())
+  }
+
+  async run(task) {
+    const page = this.pages.pop()
     let result = null
     try {
-      result = await fn(page)
+      result = await task.fn(page)
     } catch (error) {
-      debug("Failed to execute fn in pool", error)
+      console.error("failed to execute task", task.id, error)
     } finally {
       this.pages.push(page)
-      debug("POOL end run", this.pages.length)
-      this.events.emit("released", undefined)
+      this.events.emit(`resolved:${task.id}`, result)
+      this.events.emit("finished", null)
     }
-    return result
   }
 
   /**
@@ -240,14 +294,19 @@ class Pool {
    * @param {(page) => Promise<T>} fn
    * @returns {Promise<T>}
    */
-  async process(fn) {
-    if (this.pages.length) {
-      debug("POOL has pages", this.pages.length)
-      return await this._run(fn, this.pages.pop())
-    } else {
-      await this.events.take("released")
-      return await this.process(fn)
+  process(fn) {
+    const id = nanoid(4)
+    const deb = De(`pool:process:${id}`)
+
+    this.queue.push({ id, fn })
+    deb(`enqueue:${id}`)
+
+    if (this.queue.length <= this.pages.length) {
+      this.runNext()
     }
+
+    this.events.once(`resolved:${id}`, () => deb(`resolved:${id}`))
+    return this.events.take(`resolved:${id}`)
   }
 }
 
