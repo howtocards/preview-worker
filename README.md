@@ -10,11 +10,12 @@ yarn
 
 with env variables
 
-- **RABBIT_HOST** — RabbitMQ server. default `amqp://localhost:5672`
+- **CALLBACK_HOST** — Internal API that called after screenshoting. default: `http://localhost:9002`
+- **POOL_SIZE** — Count of tabs in browser. default `require('os').cpus().length / 2`
 - **QUEUE_NAME** — Queue name in Rabbit. default `howtocards:render`
+- **RABBIT_HOST** — RabbitMQ server. default `amqp://localhost:5672`
 - **RENDER_HOST** — Howtocards Frontend instance. default `https://howtocards.io`
 - **UPLOADER_HOST** — Image Uploader internal API. default `http://localhost:4000`
-- **POOL_SIZE** — Count of tabs in browser: default `require('os').cpus().length / 2`
 
 ## Development
 
@@ -43,7 +44,12 @@ Steps:
 3. Task rendered by specified type
 
    - `user` just makes screenshot of user page
-   - `card` makes screenshot of card, and get HTML of card content. Frontend should render with Slate
+   - `card` makes screenshot of card, and get snapshot. Frontend should render with Slate
 
 4. Tab returned to pool
 5. Screenshot is uploaded to `UPLOADER_HOST`
+6. If `.callback` present send POST request to `{CALLBACK_HOST}/{callback}` with JSON body `{ "screenshot": "/abcd/efgh/asdasd.png", "snapshot": "<div></div>" }`
+
+   - snapshot generated only for `card`
+   - `user` sends only `{"screenshot": ""}`
+   - `screenshot` is a path relative to `https://howtocards.io/images`

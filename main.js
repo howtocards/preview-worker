@@ -14,6 +14,7 @@ const RABBIT_HOST = process.env.RABBIT_HOST || "amqp://localhost:5672" // tls 56
 const RENDER_HOST = process.env.RENDER_HOST || "https://howtocards.io"
 const UPLOADER_HOST = process.env.UPLOADER_HOST || "http://localhost:4000"
 const QUEUE_NAME = process.env.QUEUE_NAME || "howtocards:render"
+const CALLBACK_HOST = process.env.CALLBACK_HOST || "http://localhost:9002"
 
 const POOL_SIZE = process.env.POOL_SIZE
   ? parseInt(process.env.POOL_SIZE, 10)
@@ -63,12 +64,12 @@ async function main() {
       QUEUE_NAME,
       async (message) => {
         try {
-          const taskJson = JSON.parse(message.content.toString())
-          debug("handled event", taskJson)
-          const type = getType(taskJson)
+          const task = JSON.parse(message.content.toString())
+          debug("handled event", task)
+          const type = getType(task)
 
           if (!type) {
-            debug("received unknown message type", taskJson)
+            debug("received unknown message type", task)
             channel.ack(message)
             return
           }
@@ -84,12 +85,17 @@ async function main() {
             render({
               page,
               id,
-              ...createParams(type, taskJson),
+              ...createParams(type, task),
               injectCSS: "header { opacity: 0 }",
             }),
           )
 
           const screenshotPath = await upload(result.image)
+
+          if (task.callback) {
+            await callApiBack(task.callback, screenshotPath, result.html)
+          }
+
           const timeEnd = Date.now()
           channel.ack(message)
 
@@ -241,6 +247,52 @@ async function upload(image) {
   debug("image upload status is not ok")
 
   throw new Error(response.error)
+}
+
+/**
+ * @param {string} callback
+ * @param {string} screenshotPath
+ * @param {string | void} snapshotContent
+ */
+async function callApiBack(callback, screenshotPath, snapshotContent) {
+  debug(
+    "calling internal api",
+    callback,
+    screenshotPath,
+    debugSnapshot(snapshotContent),
+  )
+  try {
+    const response = await fetch(`${CALLBACK_HOST}${callback}`, {
+      method: "POST",
+      body: JSON.stringify({
+        screenshot: screenshotPath,
+        snapshot: snapshotContent,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }).then((r) => r.json())
+
+    debug(
+      "callback successfully called",
+      callback,
+      screenshotPath,
+      debugSnapshot(snapshotContent),
+      response,
+    )
+
+    if (response.status === "ok") {
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error("failed to call internal api", error)
+    return false
+  }
+}
+
+function debugSnapshot(snapshot) {
+  return snapshot ? snapshot.slice(0, 20) : ""
 }
 
 const debPool = De("pool")
