@@ -8,7 +8,7 @@ const FormData = require("form-data")
 const fetch = require("node-fetch").default
 
 const De = require("debug")
-const debug = require("debug")("worker")
+const debug = De("worker")
 
 const RABBIT_HOST = process.env.RABBIT_HOST || "amqp://localhost:5672" // tls 5671
 const RENDER_HOST = process.env.RENDER_HOST || "https://howtocards.io"
@@ -63,13 +63,12 @@ async function main() {
       QUEUE_NAME,
       async (message) => {
         try {
-          const json = JSON.parse(message.content.toString())
-          debug("handled event", json)
+          const taskJson = JSON.parse(message.content.toString())
+          debug("handled event", taskJson)
+          const type = getType(taskJson)
 
-          const { type, ...payload } = json
-
-          if (!checkEvent({ type, payload })) {
-            debug("received unknown message type", type)
+          if (!type) {
+            debug("received unknown message type", taskJson)
             channel.ack(message)
             return
           }
@@ -85,7 +84,7 @@ async function main() {
             render({
               page,
               id,
-              ...createParams(type, payload),
+              ...createParams(type, taskJson),
               injectCSS: "header { opacity: 0 }",
             }),
           )
@@ -310,29 +309,38 @@ class Pool {
   }
 }
 
+function getType(task) {
+  if (typeof task.user === "string" && typeof task.callback === "string") {
+    return "user"
+  }
+  if (typeof task.card === "string" && typeof task.callback === "string") {
+    return "card"
+  }
+  return null
+}
+
 function createParams(type, payload) {
   switch (type) {
     case "user":
       return {
-        url: `/@${payload.name}`,
+        url: `/@${payload.user}`,
         screenshot: { selector: "header + div > div" },
         snapshot: null,
       }
     case "card":
       return {
-        url: `/open/${payload.id}`,
+        url: `/open/${payload.card}`,
         screenshot: { selector: "article" },
         snapshot: { selector: "article [data-slate-editor]" },
       }
   }
 }
 
-function checkEvent({ type, payload }) {
-  switch (type) {
-    case "user":
-      return typeof payload === "object" && typeof payload.name === "string"
+function checkEvent(task) {
+  switch (getType(task)) {
     case "card":
-      return typeof payload === "object" && typeof payload.id === "string"
+    case "user":
+      return true
   }
   return false
 }

@@ -21,14 +21,20 @@ with env variables
 - `yarn start` to run worker
 - `CTRL+C` — shutdown worker
 
+#### Docker
+
+```bash
+docker run -v `pwd`/the-files:/files -it -e "VOLUME=/files" --expose 4000  howtocards/image-uploader/image-uploader
+```
+
 ## API
 
 Worker subscribes to tasks from `QUEUE_NAME` at `RABBIT_HOST`.
 
 Task types:
 
-- `{ "type": "user", "name": "sergeysova", body: {} }` — to render `/@sergeysova`
-- `{ "type": "card", "id": 2, body: {} }` — to render `/open/2`
+- `{ "user": "@sergeysova", "extra": {}, "callback": "/preview/user/@sergeysova" }` — to render `/@sergeysova`
+- `{ "card": "2", "extra": {}, "callback": "/preview/card/2" }` — to render `/open/2`
 
 Steps:
 
