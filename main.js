@@ -262,14 +262,16 @@ async function callApiBack(callback, screenshotPath, snapshotContent) {
     debugSnapshot(snapshotContent),
   )
   try {
+    const body = JSON.stringify({
+      screenshot: screenshotPath,
+      snapshot: snapshotContent,
+    })
     const response = await fetch(`${CALLBACK_HOST}${callback}`, {
       method: "POST",
-      body: JSON.stringify({
-        screenshot: screenshotPath,
-        snapshot: snapshotContent,
-      }),
+      body: body,
       headers: {
         "Content-Type": "application/json",
+        accept: "application/json",
       },
     }).then((r) => r.json())
 
